@@ -49,13 +49,15 @@ For each asset, we calculated:
 
 The plot below shows these engineered features for BTC, validating our approach by showing that high volatility periods coincide with more frequent jumps.
 
-![Engineered Features for BTC](images/feature_engineering.png)
+<img width="1484" height="983" alt="btcusd" src="https://github.com/user-attachments/assets/13c9b77f-a9b1-41a6-97b2-a86c862fabe4" />
+
 *Figure 1: Daily realized volatility and detected intraday jumps for BTC/USD.*
 
 #### **Cross-Asset Features (Contagion)**
 To model market contagion, we engineered features like the 30-day rolling correlation between BTC and the S&P 500. The plot shows this relationship is highly dynamic, motivating the use of a learning-based model.
 
-![BTC vs SPX Correlation](images/correlation_plot.png)
+<img width="1275" height="558" alt="correlation btc and sp500" src="https://github.com/user-attachments/assets/c5a484fb-df5b-48dc-8dd6-a7bada18a2b6" />
+
 *Figure 2: The 30-day rolling correlation between BTC and SPX returns is highly non-stationary.*
 
 ---
@@ -80,7 +82,7 @@ $$
 $$
 This trains the model to produce a distribution that makes the observed outcomes most probable.
 
-![Probabilistic Forecasts](images/probabilistic_forecasts.png)
+<img width="1294" height="1286" alt="prob forecasts" src="https://github.com/user-attachments/assets/a7554028-82bb-442f-8998-71ca49637117" />
 *Figure 3: The model's predicted mean (red, dashed) and 95% confidence interval (red, shaded) against the actual log-volatility (blue).*
 
 ---
