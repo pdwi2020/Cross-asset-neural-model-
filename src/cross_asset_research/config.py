@@ -69,6 +69,28 @@ class RiskConfig:
 
 
 @dataclass
+class StatsConfig:
+    """Statistical test settings."""
+
+    spa_benchmark_model: str = "naive_last_surface"
+    spa_bootstrap: int = 300
+    spa_block_size: int = 10
+    mcs_alpha: float = 0.10
+    mcs_bootstrap: int = 300
+
+
+@dataclass
+class EconomicConfig:
+    """Economic backtest settings."""
+
+    enabled: bool = True
+    annualization: int = 252
+    target_daily_vol: float = 0.01
+    max_leverage: float = 3.0
+    transaction_cost_bps: float = 5.0
+
+
+@dataclass
 class ReportingConfig:
     """Reporting and artifact settings."""
 
@@ -87,11 +109,15 @@ class PipelineConfig:
     alpha: float = 0.05
     include_lstm: bool = True
     include_student_t_baseline: bool = True
+    include_garch_baseline: bool = True
+    include_har_j_baseline: bool = True
     data: DataConfig = field(default_factory=DataConfig)
     features: FeatureConfig = field(default_factory=FeatureConfig)
     walkforward: WalkForwardConfig = field(default_factory=WalkForwardConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     risk: RiskConfig = field(default_factory=RiskConfig)
+    stats: StatsConfig = field(default_factory=StatsConfig)
+    economic: EconomicConfig = field(default_factory=EconomicConfig)
     reporting: ReportingConfig = field(default_factory=ReportingConfig)
 
     def apply_quick_mode(self) -> None:
@@ -107,3 +133,5 @@ class PipelineConfig:
         self.walkforward.step_size = 60
         self.model.lstm_epochs = 4
         self.model.lstm_hidden = 24
+        self.stats.spa_bootstrap = min(self.stats.spa_bootstrap, 120)
+        self.stats.mcs_bootstrap = min(self.stats.mcs_bootstrap, 120)

@@ -14,13 +14,16 @@
 10. Real-data ingestion (intraday minute-bars -> daily realized measures)
 11. Distribution-aware evaluation and risk backtesting (Gaussian vs Student-t)
 12. End-to-end test coverage including synthetic and real-data smoke runs
+13. New econometric baselines (HAR-J and GARCH(1,1)-QML)
+14. SPA test and approximate Model Confidence Set (MCS) workflow
+15. Economic backtests with volatility targeting and transaction costs
 
 ## High-ROI next steps
 
 1. Add richer heavy-tail families (skew-t / Gaussian-mixture / EVT tail splice)
 2. Add regime-conditioned experts or switching state-space models
 3. Add feature attribution and stability analysis (SHAP + temporal drift)
-4. Translate risk forecasts into portfolio controls and trading constraints
+4. Add portfolio optimization overlays (risk budgeting, turnover constraints, execution lag)
 5. Add experiment tracking (MLflow/W&B) for audit-grade provenance
 6. Add CI/CD for automated backtests and artifact publishing
 7. Add real market data adapters (Polygon/Alpaca/Crypto exchanges) with cache + schema contracts

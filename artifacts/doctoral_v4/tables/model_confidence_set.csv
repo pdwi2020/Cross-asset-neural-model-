@@ -1,0 +1,9 @@
+model,in_mcs,mean_loss
+har_j_rv,True,2.3860932227657717e-06
+prob_har_gaussian,True,2.3860932227657717e-06
+prob_har_student_t,True,2.3860932227657717e-06
+har_rv,True,2.3866128574901433e-06
+garch11_qml,True,2.407687531506753e-06
+var1_cross_asset,True,2.4403415931919527e-06
+naive_last_surface,False,4.533154784705388e-06
+prob_lstm_gaussian,False,4.533154784705388e-06

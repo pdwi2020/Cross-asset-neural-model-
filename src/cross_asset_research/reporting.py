@@ -29,7 +29,12 @@ def save_tables(
     leaderboard_df: pd.DataFrame,
     asset_metrics_df: pd.DataFrame,
     dm_df: pd.DataFrame,
+    spa_df: pd.DataFrame,
+    mcs_df: pd.DataFrame,
+    mcs_elim_df: pd.DataFrame,
     risk_df: pd.DataFrame,
+    economic_df: pd.DataFrame,
+    economic_pnl_df: pd.DataFrame,
     split_perf_df: pd.DataFrame,
     split_boundaries_df: pd.DataFrame,
     out_tables_dir: Path,
@@ -47,8 +52,23 @@ def save_tables(
     outputs["dm_tests"] = out_tables_dir / "dm_tests.csv"
     dm_df.to_csv(outputs["dm_tests"], index=False)
 
+    outputs["spa_tests"] = out_tables_dir / "spa_tests.csv"
+    spa_df.to_csv(outputs["spa_tests"], index=False)
+
+    outputs["model_confidence_set"] = out_tables_dir / "model_confidence_set.csv"
+    mcs_df.to_csv(outputs["model_confidence_set"], index=False)
+
+    outputs["model_confidence_set_elimination"] = out_tables_dir / "model_confidence_set_elimination.csv"
+    mcs_elim_df.to_csv(outputs["model_confidence_set_elimination"], index=False)
+
     outputs["risk_backtests"] = out_tables_dir / "risk_backtests.csv"
     risk_df.to_csv(outputs["risk_backtests"], index=False)
+
+    outputs["economic_backtests"] = out_tables_dir / "economic_backtests.csv"
+    economic_df.to_csv(outputs["economic_backtests"], index=False)
+
+    outputs["economic_portfolio_pnl"] = out_tables_dir / "economic_portfolio_pnl.csv"
+    economic_pnl_df.to_csv(outputs["economic_portfolio_pnl"], index=True)
 
     outputs["split_performance"] = out_tables_dir / "split_performance.csv"
     split_perf_df.to_csv(outputs["split_performance"], index=False)
@@ -73,7 +93,11 @@ def generate_advanced_figures(
     leaderboard_df: pd.DataFrame,
     asset_metrics_df: pd.DataFrame,
     dm_df: pd.DataFrame,
+    spa_df: pd.DataFrame,
+    mcs_df: pd.DataFrame,
     risk_df: pd.DataFrame,
+    economic_df: pd.DataFrame,
+    economic_pnl_df: pd.DataFrame,
     split_perf_df: pd.DataFrame,
     predictions_by_model: Dict[str, Dict[str, pd.DataFrame]],
     best_model: str,
@@ -194,6 +218,48 @@ def generate_advanced_figures(
         _save_figure(fig, path, dpi)
         outputs["dm_significance"] = path
 
+    if not spa_df.empty:
+        fig, ax = plt.subplots(figsize=(10, 5))
+        sns.barplot(
+            data=spa_df,
+            x="model",
+            y="mean_loss_improvement_vs_benchmark",
+            hue="model",
+            palette="crest",
+            legend=False,
+            ax=ax,
+        )
+        ax.axhline(0.0, ls="--", color="black", lw=1.0)
+        spa_p = float(spa_df["spa_global_p"].iloc[0])
+        ax.set_title(f"SPA Improvements vs Benchmark (global p={spa_p:.3f})")
+        ax.set_xlabel("Model")
+        ax.set_ylabel("Mean loss improvement")
+        ax.tick_params(axis="x", rotation=20)
+        path = out_fig_dir / "13_spa_improvements.png"
+        _save_figure(fig, path, dpi)
+        outputs["spa_improvements"] = path
+
+    if not mcs_df.empty:
+        plot_df = mcs_df.copy()
+        plot_df["in_mcs_flag"] = plot_df["in_mcs"].astype(int)
+        fig, ax = plt.subplots(figsize=(10, 5))
+        sns.scatterplot(
+            data=plot_df,
+            x="model",
+            y="mean_loss",
+            hue="in_mcs",
+            style="in_mcs",
+            s=150,
+            ax=ax,
+        )
+        ax.set_title("Model Confidence Set Membership")
+        ax.set_xlabel("Model")
+        ax.set_ylabel("Mean loss")
+        ax.tick_params(axis="x", rotation=20)
+        path = out_fig_dir / "14_model_confidence_set.png"
+        _save_figure(fig, path, dpi)
+        outputs["model_confidence_set"] = path
+
     if not risk_df.empty:
         pivot = risk_df.pivot(index="asset", columns="model", values="observed_exceed_rate")
         fig, ax = plt.subplots(figsize=(10, 6))
@@ -202,6 +268,41 @@ def generate_advanced_figures(
         path = out_fig_dir / "08_var_exceedance_heatmap.png"
         _save_figure(fig, path, dpi)
         outputs["var_exceedance_heatmap"] = path
+
+    if not economic_df.empty:
+        port = economic_df[economic_df["asset"] == "portfolio_equal_weight"].copy()
+        if not port.empty:
+            fig, ax = plt.subplots(figsize=(10, 5))
+            sns.barplot(
+                data=port.sort_values("sharpe_net", ascending=False),
+                x="model",
+                y="sharpe_net",
+                hue="model",
+                palette="magma",
+                legend=False,
+                ax=ax,
+            )
+            ax.axhline(0.0, ls="--", color="black", lw=1.0)
+            ax.set_title("Economic Backtest: Net Sharpe by Model")
+            ax.set_xlabel("Model")
+            ax.set_ylabel("Net Sharpe")
+            ax.tick_params(axis="x", rotation=20)
+            path = out_fig_dir / "15_economic_sharpe.png"
+            _save_figure(fig, path, dpi)
+            outputs["economic_sharpe"] = path
+
+    if not economic_pnl_df.empty:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        eq = (1.0 + economic_pnl_df.fillna(0.0)).cumprod()
+        for c in eq.columns:
+            ax.plot(eq.index, eq[c], lw=1.2, label=c)
+        ax.set_title("Economic Backtest: Cumulative Net Portfolio Returns")
+        ax.set_xlabel("Date")
+        ax.set_ylabel("Equity curve")
+        ax.legend(ncol=2, fontsize=8)
+        path = out_fig_dir / "16_economic_equity_curve.png"
+        _save_figure(fig, path, dpi)
+        outputs["economic_equity_curve"] = path
 
     if not split_perf_df.empty:
         fig, ax = plt.subplots(figsize=(12, 6))
@@ -280,7 +381,10 @@ def write_summary_markdown(
     config_summary: Dict[str, object],
     leaderboard_df: pd.DataFrame,
     dm_df: pd.DataFrame,
+    spa_df: pd.DataFrame,
+    mcs_df: pd.DataFrame,
     risk_df: pd.DataFrame,
+    economic_df: pd.DataFrame,
     figure_paths: Dict[str, Path],
 ) -> Path:
     """Write a concise run summary markdown report."""
@@ -316,6 +420,28 @@ def write_summary_markdown(
                 + f"BH reject={bool(row.get('bh_reject_h0', False))}"
             )
 
+    if not spa_df.empty:
+        lines.append("")
+        lines.append("## SPA Test")
+        lines.append("")
+        spa_p = float(spa_df["spa_global_p"].iloc[0])
+        benchmark = str(spa_df["benchmark"].iloc[0])
+        lines.append(f"- Global SPA p-value (benchmark `{benchmark}`): `{spa_p:.4f}`")
+        top_spa = spa_df.sort_values("model_one_sided_p").head(5)
+        for _, row in top_spa.iterrows():
+            lines.append(
+                "- "
+                + f"{row['model']}: improvement={row['mean_loss_improvement_vs_benchmark']:.6f}, "
+                + f"one-sided p={row['model_one_sided_p']:.4f}"
+            )
+
+    if not mcs_df.empty:
+        lines.append("")
+        lines.append("## Model Confidence Set")
+        lines.append("")
+        in_set = mcs_df[mcs_df["in_mcs"] == True]  # noqa: E712
+        lines.append("- In-MCS models: " + ", ".join(in_set["model"].astype(str).tolist()))
+
     if not risk_df.empty:
         lines.append("")
         lines.append("## Risk Calibration Snapshot")
@@ -335,6 +461,20 @@ def write_summary_markdown(
                 + f"{row['model']}: exceed={row['observed_exceed_rate']:.3f}, "
                 + f"Kupiec p={row['kupiec_p_value']:.3f}, Christoffersen p={row['christoffersen_p_value']:.3f}"
             )
+
+    if not economic_df.empty:
+        lines.append("")
+        lines.append("## Economic Backtest Snapshot")
+        lines.append("")
+        port = economic_df[economic_df["asset"] == "portfolio_equal_weight"].copy()
+        if not port.empty:
+            for _, row in port.sort_values("sharpe_net", ascending=False).head(5).iterrows():
+                lines.append(
+                    "- "
+                    + f"{row['model']}: Sharpe={row['sharpe_net']:.3f}, "
+                    + f"AnnRet={row['ann_return_net']:.3f}, "
+                    + f"AnnVol={row['ann_vol_net']:.3f}, MDD={row['max_drawdown_net']:.3f}"
+                )
 
     lines.append("")
     lines.append("## Figures")

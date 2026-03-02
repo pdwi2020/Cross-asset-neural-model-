@@ -2,7 +2,12 @@ import numpy as np
 import pandas as pd
 
 from cross_asset_research.risk_backtests import run_var_es_backtest
-from cross_asset_research.stats_tests import diebold_mariano_test, pairwise_dm_vs_baseline
+from cross_asset_research.stats_tests import (
+    diebold_mariano_test,
+    model_confidence_set,
+    pairwise_dm_vs_baseline,
+    spa_test,
+)
 
 
 def test_dm_detects_better_model() -> None:
@@ -47,3 +52,22 @@ def test_var_backtest_outputs_expected_columns() -> None:
     assert {"model", "asset", "observed_exceed_rate", "kupiec_p_value", "christoffersen_p_value"}.issubset(
         out.columns
     )
+
+
+def test_spa_and_mcs_outputs() -> None:
+    idx = pd.date_range("2024-01-01", periods=120, freq="D")
+    rng = np.random.default_rng(4)
+    losses = {
+        "naive_last_surface": pd.Series(rng.normal(1.0, 0.1, len(idx)), index=idx),
+        "har_rv": pd.Series(rng.normal(0.9, 0.1, len(idx)), index=idx),
+        "garch11_qml": pd.Series(rng.normal(0.95, 0.1, len(idx)), index=idx),
+    }
+
+    spa = spa_test(losses, benchmark="naive_last_surface", n_bootstrap=60, block_size=5, seed=0)
+    assert not spa.empty
+    assert {"benchmark", "model", "spa_global_p", "model_one_sided_p"}.issubset(spa.columns)
+
+    mcs, elim = model_confidence_set(losses, alpha=0.1, n_bootstrap=60, block_size=5, seed=0)
+    assert not mcs.empty
+    assert {"model", "in_mcs", "mean_loss"}.issubset(mcs.columns)
+    assert isinstance(elim, pd.DataFrame)

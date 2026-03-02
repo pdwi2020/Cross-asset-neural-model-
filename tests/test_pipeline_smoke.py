@@ -15,6 +15,9 @@ def test_pipeline_smoke_generates_artifacts(tmp_path: Path) -> None:
     out = run_doctoral_pipeline(cfg)
 
     assert out["leaderboard"].shape[0] >= 3
+    assert "spa_tests" in out
+    assert "mcs" in out
+    assert "economic_backtests" in out
     assert out["manifest_path"].exists()
     assert out["summary_markdown"].exists()
 
@@ -22,7 +25,10 @@ def test_pipeline_smoke_generates_artifacts(tmp_path: Path) -> None:
     table_dir = tmp_path / "smoke" / "tables"
     assert fig_dir.exists()
     assert table_dir.exists()
-    assert len(list(fig_dir.glob("*.png"))) >= 8
+    assert len(list(fig_dir.glob("*.png"))) >= 10
+    assert (table_dir / "spa_tests.csv").exists()
+    assert (table_dir / "model_confidence_set.csv").exists()
+    assert (table_dir / "economic_backtests.csv").exists()
 
 
 def _write_intraday(path: Path, *, seed: int, days: int = 14) -> None:

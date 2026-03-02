@@ -1,0 +1,3 @@
+step,removed_model,reference_best_model,bootstrap_p_value,mean_loss_diff_removed_minus_best
+1,naive_last_surface,har_j_rv,0.008264462809917356,2.147061561939616e-06
+2,prob_lstm_gaussian,har_j_rv,0.008264462809917356,2.147061561939616e-06

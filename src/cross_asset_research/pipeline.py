@@ -15,12 +15,13 @@ import pandas as pd
 from .baselines import default_models, fit_predict_models
 from .config import PipelineConfig
 from .deep_models import probabilistic_lstm_forecast
+from .economic_backtest import run_economic_backtests
 from .evaluation import ModelEvaluation, evaluate_model, evaluations_to_frame
 from .features import build_cross_asset_features, get_feature_columns, get_target_columns
 from .real_data import build_cross_asset_daily_frame
 from .reporting import generate_advanced_figures, prepare_report_dirs, save_tables, write_summary_markdown
 from .risk_backtests import run_var_es_backtest
-from .stats_tests import pairwise_dm_vs_baseline
+from .stats_tests import model_confidence_set, pairwise_dm_vs_baseline, spa_test
 from .synthetic_data import generate_synthetic_cross_asset_data
 from .walkforward import generate_walkforward_splits, summarize_splits
 
@@ -161,7 +162,11 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         train_val_df = pd.concat([train_df, val_df], axis=0)
 
         forecasts = fit_predict_models(
-            default_models(include_student_t=cfg.include_student_t_baseline),
+            default_models(
+                include_student_t=cfg.include_student_t_baseline,
+                include_garch=cfg.include_garch_baseline,
+                include_har_j=cfg.include_har_j_baseline,
+            ),
             train_df=train_val_df,
             test_df=test_df,
             assets=assets,
@@ -275,6 +280,23 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         horizon=cfg.risk.var_horizon_days,
         alpha=cfg.alpha,
     )
+    spa_benchmark = cfg.stats.spa_benchmark_model
+    if spa_benchmark not in losses_by_model:
+        spa_benchmark = "naive_last_surface" if "naive_last_surface" in losses_by_model else best_model
+    spa_df = spa_test(
+        losses_by_model,
+        benchmark=spa_benchmark,
+        n_bootstrap=cfg.stats.spa_bootstrap,
+        block_size=cfg.stats.spa_block_size,
+        seed=cfg.seed,
+    )
+    mcs_df, mcs_elim_df = model_confidence_set(
+        losses_by_model,
+        alpha=cfg.stats.mcs_alpha,
+        n_bootstrap=cfg.stats.mcs_bootstrap,
+        block_size=cfg.stats.spa_block_size,
+        seed=cfg.seed,
+    )
 
     risk_frames: List[pd.DataFrame] = []
     for model_name, payload in predictions_by_model.items():
@@ -292,6 +314,19 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         )
     risk_df = pd.concat(risk_frames, ignore_index=True) if risk_frames else pd.DataFrame()
 
+    if cfg.economic.enabled:
+        econ_df, econ_pnl_df = run_economic_backtests(
+            predictions_by_model=predictions_by_model,
+            raw_df=raw_df,
+            assets=assets,
+            annualization=cfg.economic.annualization,
+            target_daily_vol=cfg.economic.target_daily_vol,
+            max_leverage=cfg.economic.max_leverage,
+            transaction_cost_bps=cfg.economic.transaction_cost_bps,
+        )
+    else:
+        econ_df, econ_pnl_df = pd.DataFrame(), pd.DataFrame()
+
     split_perf_df = pd.DataFrame(split_perf_rows)
 
     report_dirs = prepare_report_dirs(cfg.reporting.output_dir, cfg.reporting.run_name)
@@ -299,7 +334,12 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         leaderboard_df=leaderboard_df,
         asset_metrics_df=asset_metrics_df,
         dm_df=dm_df,
+        spa_df=spa_df,
+        mcs_df=mcs_df,
+        mcs_elim_df=mcs_elim_df,
         risk_df=risk_df,
+        economic_df=econ_df,
+        economic_pnl_df=econ_pnl_df,
         split_perf_df=split_perf_df,
         split_boundaries_df=split_boundaries_df,
         out_tables_dir=report_dirs["tables"],
@@ -335,7 +375,11 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         leaderboard_df=leaderboard_df,
         asset_metrics_df=asset_metrics_df,
         dm_df=dm_df,
+        spa_df=spa_df,
+        mcs_df=mcs_df,
         risk_df=risk_df,
+        economic_df=econ_df,
+        economic_pnl_df=econ_pnl_df,
         split_perf_df=split_perf_df,
         predictions_by_model=predictions_by_model,
         best_model=best_model,
@@ -354,15 +398,23 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
             f"test={cfg.walkforward.test_size},step={cfg.walkforward.step_size}"
         ),
         "include_lstm": cfg.include_lstm,
+        "include_har_j_baseline": cfg.include_har_j_baseline,
+        "include_garch_baseline": cfg.include_garch_baseline,
         "include_student_t_baseline": cfg.include_student_t_baseline,
         "var_alpha": cfg.risk.var_alpha,
+        "spa_benchmark": spa_benchmark,
+        "economic_backtest": cfg.economic.enabled,
+        "transaction_cost_bps": cfg.economic.transaction_cost_bps,
     }
     summary_md = write_summary_markdown(
         output_root=report_dirs["root"],
         config_summary=config_summary,
         leaderboard_df=leaderboard_df,
         dm_df=dm_df,
+        spa_df=spa_df,
+        mcs_df=mcs_df,
         risk_df=risk_df,
+        economic_df=econ_df,
         figure_paths=figure_paths,
     )
 
@@ -387,7 +439,12 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         "leaderboard": leaderboard_df,
         "asset_metrics": asset_metrics_df,
         "dm_tests": dm_df,
+        "spa_tests": spa_df,
+        "mcs": mcs_df,
+        "mcs_elimination": mcs_elim_df,
         "risk_backtests": risk_df,
+        "economic_backtests": econ_df,
+        "economic_pnl": econ_pnl_df,
         "split_performance": split_perf_df,
         "predictions_by_model": predictions_by_model,
     }
@@ -414,13 +471,20 @@ def _build_parser() -> argparse.ArgumentParser:
         help="Real-data CSV map: asset=path,asset2=path2",
     )
     parser.add_argument("--timezone", type=str, default="UTC", help="Timezone for day aggregation in real mode")
+    parser.add_argument("--spa-benchmark", type=str, default=None, help="Benchmark model name for SPA test")
+    parser.add_argument("--transaction-cost-bps", type=float, default=5.0, help="Transaction cost in bps")
+    parser.add_argument("--target-daily-vol", type=float, default=0.01, help="Target daily strategy volatility")
+    parser.add_argument("--max-leverage", type=float, default=3.0, help="Maximum portfolio leverage")
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--quick", action="store_true", help="Quick mode (default)")
     mode.add_argument("--full", action="store_true", help="Full run mode")
 
     parser.add_argument("--no-lstm", action="store_true", help="Disable probabilistic LSTM model")
+    parser.add_argument("--no-garch", action="store_true", help="Disable GARCH(1,1) baseline")
+    parser.add_argument("--no-har-j", action="store_true", help="Disable HAR-J baselines")
     parser.add_argument("--no-student-t", action="store_true", help="Disable Student-t HAR baseline")
+    parser.add_argument("--no-economic-backtest", action="store_true", help="Disable economic backtests")
     return parser
 
 
@@ -455,10 +519,16 @@ def main() -> None:
 
     cfg.data.data_source = args.data_source
     cfg.include_lstm = not args.no_lstm
+    cfg.include_garch_baseline = not args.no_garch
+    cfg.include_har_j_baseline = not args.no_har_j
     cfg.include_student_t_baseline = not args.no_student_t
     cfg.reporting.output_dir = args.output_dir
     cfg.reporting.run_name = args.run_name
     cfg.data.timezone = args.timezone
+    cfg.economic.enabled = not args.no_economic_backtest
+    cfg.economic.transaction_cost_bps = float(args.transaction_cost_bps)
+    cfg.economic.target_daily_vol = float(args.target_daily_vol)
+    cfg.economic.max_leverage = float(args.max_leverage)
 
     assets_explicit = args.assets is not None
     if args.n_days is not None:
@@ -466,6 +536,8 @@ def main() -> None:
     if args.assets:
         cfg.data.assets = [a.strip() for a in args.assets.split(",") if a.strip()]
     cfg.data.intraday_file_map = _parse_intraday_map(args.intraday_map)
+    if args.spa_benchmark:
+        cfg.stats.spa_benchmark_model = args.spa_benchmark
 
     if cfg.data.data_source == "real":
         if not cfg.data.intraday_file_map:

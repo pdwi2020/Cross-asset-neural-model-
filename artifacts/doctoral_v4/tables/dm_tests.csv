@@ -1,0 +1,8 @@
+model,baseline,n_obs,dm_stat,p_value,mean_loss_diff_model_minus_baseline,comparison,holm_threshold,holm_reject_h0,bh_threshold,bh_reject_h0
+naive_last_surface,har_rv,360,2.022469558445277,0.04312786539476687,2.146541927215245e-06,naive_last_surface_vs_har_rv,0.0071428571428571435,False,0.007142857142857143,False
+prob_lstm_gaussian,har_rv,360,2.022469558445277,0.04312786539476687,2.146541927215245e-06,prob_lstm_gaussian_vs_har_rv,0.008333333333333333,False,0.014285714285714285,False
+var1_cross_asset,har_rv,360,0.7743925913492502,0.43869866348990527,5.372873570180989e-08,var1_cross_asset_vs_har_rv,0.01,False,0.02142857142857143,False
+har_j_rv,har_rv,360,0.0,1.0,-5.196347243716131e-10,har_j_rv_vs_har_rv,0.0125,False,0.02857142857142857,False
+garch11_qml,har_rv,360,0.0,1.0,2.1074674016609853e-08,garch11_qml_vs_har_rv,0.016666666666666666,False,0.03571428571428572,False
+prob_har_gaussian,har_rv,360,0.0,1.0,-5.196347243716131e-10,prob_har_gaussian_vs_har_rv,0.025,False,0.04285714285714286,False
+prob_har_student_t,har_rv,360,0.0,1.0,-5.196347243716131e-10,prob_har_student_t_vs_har_rv,0.05,False,0.05,False
