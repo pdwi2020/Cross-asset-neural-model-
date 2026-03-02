@@ -1,0 +1,5 @@
+model,baseline,n_obs,dm_stat,p_value,mean_loss_diff_model_minus_baseline,comparison,holm_threshold,holm_reject_h0,bh_threshold,bh_reject_h0
+naive_last_surface,har_rv,360,2.0268378785100913,0.042678995283548904,2.147061561939616e-06,naive_last_surface_vs_har_rv,0.0125,False,0.0125,False
+prob_lstm_gaussian,har_rv,360,2.0268378785100913,0.042678995283548904,2.147061561939616e-06,prob_lstm_gaussian_vs_har_rv,0.016666666666666666,False,0.025,False
+var1_cross_asset,har_rv,360,0.7907616204204153,0.4290831100720469,5.424837042618148e-08,var1_cross_asset_vs_har_rv,0.025,False,0.037500000000000006,False
+prob_har_gaussian,har_rv,360,0.0,1.0,0.0,prob_har_gaussian_vs_har_rv,0.05,False,0.05,False
