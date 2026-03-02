@@ -17,6 +17,7 @@ from .config import PipelineConfig
 from .deep_models import probabilistic_lstm_forecast
 from .evaluation import ModelEvaluation, evaluate_model, evaluations_to_frame
 from .features import build_cross_asset_features, get_feature_columns, get_target_columns
+from .real_data import build_cross_asset_daily_frame
 from .reporting import generate_advanced_figures, prepare_report_dirs, save_tables, write_summary_markdown
 from .risk_backtests import run_var_es_backtest
 from .stats_tests import pairwise_dm_vs_baseline
@@ -48,6 +49,33 @@ def _asset_metrics_frame(evals: Iterable[ModelEvaluation]) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
+def _adaptive_walkforward_params(n_samples: int) -> Dict[str, int] | None:
+    """Derive conservative split sizes for shorter real-data histories."""
+
+    if n_samples < 6:
+        return None
+
+    train = max(int(0.6 * n_samples), 4)
+    val = max(int(0.2 * n_samples), 1)
+    test = max(int(0.1 * n_samples), 1)
+
+    while train + val + test > n_samples and train > 4:
+        train -= 1
+    while train + val + test > n_samples and val > 1:
+        val -= 1
+    while train + val + test > n_samples and test > 1:
+        test -= 1
+
+    if train + val + test > n_samples:
+        return None
+    return {
+        "train_size": train,
+        "val_size": val,
+        "test_size": test,
+        "step_size": max(test // 2, 1),
+    }
+
+
 def _append_prediction_segment(
     store: Dict[str, Dict[str, List[pd.DataFrame]]],
     *,
@@ -55,12 +83,16 @@ def _append_prediction_segment(
     y_true: pd.DataFrame,
     mu: pd.DataFrame,
     sigma: pd.DataFrame,
+    distribution: str = "gaussian",
+    dof: pd.DataFrame | None = None,
 ) -> None:
     if model_name not in store:
-        store[model_name] = {"y_true": [], "mu": [], "sigma": []}
+        store[model_name] = {"y_true": [], "mu": [], "sigma": [], "dof": [], "distribution": distribution}
     store[model_name]["y_true"].append(y_true)
     store[model_name]["mu"].append(mu)
     store[model_name]["sigma"].append(sigma)
+    if dof is not None:
+        store[model_name]["dof"].append(dof)
 
 
 def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, object]:
@@ -71,9 +103,27 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
     _set_global_seed(cfg.seed)
 
     assets = list(cfg.data.assets)
-    data_bundle = generate_synthetic_cross_asset_data(cfg.data, seed=cfg.seed)
-    raw_df = data_bundle.frame.copy()
+    if cfg.data.data_source == "real":
+        raw_df = build_cross_asset_daily_frame(
+            cfg.data.intraday_file_map,
+            timezone=cfg.data.timezone,
+            jump_z=cfg.data.jump_z,
+            min_obs_per_day=cfg.data.min_obs_per_day,
+        )
+    else:
+        data_bundle = generate_synthetic_cross_asset_data(cfg.data, seed=cfg.seed)
+        raw_df = data_bundle.frame.copy()
     engineered = build_cross_asset_features(raw_df, assets=assets, config=cfg.features)
+    if engineered.empty and len(raw_df) >= 12:
+        cfg.features.corr_window = min(cfg.features.corr_window, max(5, len(raw_df) // 6))
+        cfg.features.beta_window = min(cfg.features.beta_window, max(5, len(raw_df) // 6))
+        cfg.features.weekly_lag = min(cfg.features.weekly_lag, max(2, len(raw_df) // 20))
+        cfg.features.monthly_lag = min(cfg.features.monthly_lag, max(5, len(raw_df) // 8))
+        engineered = build_cross_asset_features(raw_df, assets=assets, config=cfg.features)
+    if engineered.empty:
+        raise ValueError(
+            "Feature engineering produced zero rows. Increase data length or reduce feature windows."
+        )
 
     feature_cols = get_feature_columns(engineered, assets)
     target_cols = get_target_columns(assets)
@@ -86,9 +136,19 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         step_size=cfg.walkforward.step_size,
     )
     if not splits:
-        raise ValueError(
-            "No walk-forward splits generated. Increase data.n_days or reduce window sizes."
-        )
+        adaptive = _adaptive_walkforward_params(len(engineered))
+        if adaptive is not None:
+            splits = generate_walkforward_splits(len(engineered), **adaptive)
+            if splits:
+                cfg.walkforward.train_size = adaptive["train_size"]
+                cfg.walkforward.val_size = adaptive["val_size"]
+                cfg.walkforward.test_size = adaptive["test_size"]
+                cfg.walkforward.step_size = adaptive["step_size"]
+        if not splits:
+            raise ValueError(
+                "No walk-forward splits generated. Increase data length or reduce window sizes. "
+                f"n_samples={len(engineered)}."
+            )
 
     split_boundaries_df = pd.DataFrame(summarize_splits(splits))
     split_perf_rows: List[dict] = []
@@ -101,7 +161,7 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
         train_val_df = pd.concat([train_df, val_df], axis=0)
 
         forecasts = fit_predict_models(
-            default_models(),
+            default_models(include_student_t=cfg.include_student_t_baseline),
             train_df=train_val_df,
             test_df=test_df,
             assets=assets,
@@ -135,6 +195,10 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
             mu = forecast.mu[assets].copy()
             sigma = forecast.sigma[assets].copy()
             y_true = y_true_split.loc[mu.index].copy()
+            distribution = getattr(forecast, "distribution", "gaussian")
+            dof = getattr(forecast, "dof", None)
+            if dof is not None:
+                dof = dof[assets].copy()
 
             _append_prediction_segment(
                 pred_segments,
@@ -142,6 +206,8 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
                 y_true=y_true,
                 mu=mu,
                 sigma=sigma,
+                distribution=distribution,
+                dof=dof,
             )
 
             ev_split = evaluate_model(
@@ -149,6 +215,8 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
                 y_true=y_true,
                 mu_pred=mu,
                 sigma_pred=sigma,
+                distribution=distribution,
+                dof_pred=dof,
                 assets=assets,
             )
             split_perf_rows.append(
@@ -164,10 +232,13 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
 
     predictions_by_model: Dict[str, Dict[str, pd.DataFrame]] = {}
     for model_name, payload in pred_segments.items():
+        dof_df = _concat_non_overlapping(payload["dof"]) if payload["dof"] else None
         predictions_by_model[model_name] = {
             "y_true": _concat_non_overlapping(payload["y_true"]),
             "mu": _concat_non_overlapping(payload["mu"]),
             "sigma": _concat_non_overlapping(payload["sigma"]),
+            "dof": dof_df,
+            "distribution": payload.get("distribution", "gaussian"),
         }
 
     evals: List[ModelEvaluation] = []
@@ -177,6 +248,8 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
             y_true=payload["y_true"],
             mu_pred=payload["mu"],
             sigma_pred=payload["sigma"],
+            distribution=str(payload.get("distribution", "gaussian")),
+            dof_pred=payload.get("dof"),
             assets=assets,
         )
         evals.append(ev)
@@ -211,6 +284,8 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
                 y_true=payload["y_true"],
                 mu_pred=payload["mu"],
                 sigma_pred=payload["sigma"],
+                distribution=str(payload.get("distribution", "gaussian")),
+                dof_pred=payload.get("dof"),
                 assets=assets,
                 alpha=cfg.risk.var_alpha,
             )
@@ -243,7 +318,13 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
             sigma = payload["sigma"].copy()
             sigma.columns = [f"sigma_{c}" for c in sigma.columns]
 
-            merged = pd.concat([out, mu, sigma], axis=1)
+            frames = [out, mu, sigma]
+            if payload.get("dof") is not None:
+                dof = payload["dof"].copy()
+                dof.columns = [f"dof_{c}" for c in dof.columns]
+                frames.append(dof)
+
+            merged = pd.concat(frames, axis=1)
             safe_name = model_name.replace("/", "_")
             merged.to_csv(pred_dir / f"{safe_name}_predictions.csv", index=True)
 
@@ -265,6 +346,7 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
     config_summary = {
         "seed": cfg.seed,
         "quick": cfg.quick,
+        "data_source": cfg.data.data_source,
         "assets": ",".join(assets),
         "n_days": cfg.data.n_days,
         "walkforward": (
@@ -272,6 +354,7 @@ def run_doctoral_pipeline(config: PipelineConfig | None = None) -> Dict[str, obj
             f"test={cfg.walkforward.test_size},step={cfg.walkforward.step_size}"
         ),
         "include_lstm": cfg.include_lstm,
+        "include_student_t_baseline": cfg.include_student_t_baseline,
         "var_alpha": cfg.risk.var_alpha,
     }
     summary_md = write_summary_markdown(
@@ -315,15 +398,49 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output-dir", type=str, default="artifacts", help="Output artifact root directory")
     parser.add_argument("--run-name", type=str, default="latest", help="Run folder name under output-dir")
     parser.add_argument("--seed", type=int, default=42, help="Random seed")
+    parser.add_argument(
+        "--data-source",
+        type=str,
+        default="synthetic",
+        choices=["synthetic", "real"],
+        help="Input data source mode",
+    )
     parser.add_argument("--n-days", type=int, default=None, help="Override number of synthetic days")
     parser.add_argument("--assets", type=str, default=None, help="Comma-separated assets, e.g. btc,eurusd,spx")
+    parser.add_argument(
+        "--intraday-map",
+        type=str,
+        default=None,
+        help="Real-data CSV map: asset=path,asset2=path2",
+    )
+    parser.add_argument("--timezone", type=str, default="UTC", help="Timezone for day aggregation in real mode")
 
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument("--quick", action="store_true", help="Quick mode (default)")
     mode.add_argument("--full", action="store_true", help="Full run mode")
 
     parser.add_argument("--no-lstm", action="store_true", help="Disable probabilistic LSTM model")
+    parser.add_argument("--no-student-t", action="store_true", help="Disable Student-t HAR baseline")
     return parser
+
+
+def _parse_intraday_map(raw: str | None) -> Dict[str, str]:
+    if not raw:
+        return {}
+    out: Dict[str, str] = {}
+    for item in raw.split(","):
+        pair = item.strip()
+        if not pair:
+            continue
+        if "=" not in pair:
+            raise ValueError(f"Invalid intraday map item: {pair!r}. Expected asset=path.")
+        asset, path = pair.split("=", 1)
+        asset = asset.strip()
+        path = path.strip()
+        if not asset or not path:
+            raise ValueError(f"Invalid intraday map item: {pair!r}. Expected asset=path.")
+        out[asset] = path
+    return out
 
 
 def main() -> None:
@@ -336,14 +453,30 @@ def main() -> None:
     elif args.quick:
         cfg.quick = True
 
+    cfg.data.data_source = args.data_source
     cfg.include_lstm = not args.no_lstm
+    cfg.include_student_t_baseline = not args.no_student_t
     cfg.reporting.output_dir = args.output_dir
     cfg.reporting.run_name = args.run_name
+    cfg.data.timezone = args.timezone
 
+    assets_explicit = args.assets is not None
     if args.n_days is not None:
         cfg.data.n_days = int(args.n_days)
     if args.assets:
         cfg.data.assets = [a.strip() for a in args.assets.split(",") if a.strip()]
+    cfg.data.intraday_file_map = _parse_intraday_map(args.intraday_map)
+
+    if cfg.data.data_source == "real":
+        if not cfg.data.intraday_file_map:
+            raise ValueError("real mode requires --intraday-map with asset=path pairs")
+        if not assets_explicit:
+            cfg.data.assets = list(cfg.data.intraday_file_map.keys())
+        missing_assets = [a for a in cfg.data.assets if a not in cfg.data.intraday_file_map]
+        if missing_assets:
+            raise ValueError(
+                "Missing intraday files for assets in --assets: " + ",".join(missing_assets)
+            )
 
     out = run_doctoral_pipeline(cfg)
     print(f"Run complete. Output root: {out['output_root']}")

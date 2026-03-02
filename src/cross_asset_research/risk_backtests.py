@@ -7,7 +7,7 @@ from typing import Iterable, List
 
 import numpy as np
 import pandas as pd
-from scipy.stats import chi2, norm
+from scipy.stats import chi2, norm, t
 
 
 @dataclass
@@ -38,6 +38,25 @@ def gaussian_var_es(mu: np.ndarray, sigma: np.ndarray, alpha: float) -> tuple[np
     tail_prob = max(1.0 - alpha, 1e-6)
     var = mu + z * sigma
     es = mu + (pdf_z / tail_prob) * sigma
+    return var, es
+
+
+def student_t_var_es(
+    mu: np.ndarray,
+    sigma: np.ndarray,
+    dof: np.ndarray,
+    alpha: float,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Upper-tail Student-t VaR and ES."""
+
+    nu = np.maximum(np.asarray(dof, dtype=float), 2.1)
+    q = t.ppf(alpha, df=nu)
+    pdf_q = t.pdf(q, df=nu)
+    tail_prob = max(1.0 - alpha, 1e-6)
+
+    var = mu + q * sigma
+    # E[T | T > q] = ((nu + q^2) / (nu - 1)) * f(q) / (1 - alpha)
+    es = mu + sigma * ((nu + q**2) / np.maximum(nu - 1.0, 1e-6)) * (pdf_q / tail_prob)
     return var, es
 
 
@@ -94,6 +113,8 @@ def run_var_es_backtest(
     y_true: pd.DataFrame,
     mu_pred: pd.DataFrame,
     sigma_pred: pd.DataFrame,
+    distribution: str = "gaussian",
+    dof_pred: pd.DataFrame | None = None,
     assets: Iterable[str],
     alpha: float = 0.95,
 ) -> pd.DataFrame:
@@ -107,7 +128,11 @@ def run_var_es_backtest(
         mu = mu_pred[asset].to_numpy(dtype=float)
         sigma = np.maximum(sigma_pred[asset].to_numpy(dtype=float), 1e-6)
 
-        var, es = gaussian_var_es(mu, sigma, alpha)
+        if distribution == "student_t" and dof_pred is not None and asset in dof_pred.columns:
+            dof = dof_pred[asset].to_numpy(dtype=float)
+            var, es = student_t_var_es(mu, sigma, dof, alpha)
+        else:
+            var, es = gaussian_var_es(mu, sigma, alpha)
         exceed = y > var
 
         lr_uc, p_uc = kupiec_unconditional_coverage_test(exceed, alpha)

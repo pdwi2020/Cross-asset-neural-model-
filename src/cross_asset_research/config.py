@@ -3,16 +3,21 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import List
+from typing import Dict, List
 
 
 @dataclass
 class DataConfig:
-    """Synthetic data generation settings."""
+    """Data source settings for synthetic or real intraday ingestion."""
 
     assets: List[str] = field(default_factory=lambda: ["btc", "eurusd", "spx"])
+    data_source: str = "synthetic"  # synthetic | real
     n_days: int = 1800
     start_date: str = "2016-01-01"
+    timezone: str = "UTC"
+    jump_z: float = 4.0
+    min_obs_per_day: int = 30
+    intraday_file_map: Dict[str, str] = field(default_factory=dict)
     regime_transition: List[List[float]] = field(
         default_factory=lambda: [
             [0.95, 0.04, 0.01],
@@ -81,6 +86,7 @@ class PipelineConfig:
     quick: bool = True
     alpha: float = 0.05
     include_lstm: bool = True
+    include_student_t_baseline: bool = True
     data: DataConfig = field(default_factory=DataConfig)
     features: FeatureConfig = field(default_factory=FeatureConfig)
     walkforward: WalkForwardConfig = field(default_factory=WalkForwardConfig)
@@ -93,7 +99,8 @@ class PipelineConfig:
 
         if not self.quick:
             return
-        self.data.n_days = 900
+        if self.data.data_source == "synthetic":
+            self.data.n_days = 900
         self.walkforward.train_size = 360
         self.walkforward.val_size = 120
         self.walkforward.test_size = 60

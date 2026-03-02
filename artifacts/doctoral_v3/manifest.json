@@ -1,0 +1,121 @@
+{
+  "output_root": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3",
+  "best_model": "har_rv",
+  "table_paths": {
+    "leaderboard": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/leaderboard.csv",
+    "asset_metrics": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/asset_metrics.csv",
+    "dm_tests": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/dm_tests.csv",
+    "risk_backtests": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/risk_backtests.csv",
+    "split_performance": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/split_performance.csv",
+    "split_boundaries": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/tables/split_boundaries.csv"
+  },
+  "figure_paths": {
+    "regime_timeline": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/01_regime_timeline.png",
+    "logrv_panels": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/02_logrv_panels.png",
+    "correlation_heatmap": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/03_correlation_heatmap.png",
+    "dynamic_correlations": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/04_dynamic_correlations.png",
+    "leaderboard_rmse": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/05_leaderboard_rmse.png",
+    "calibration_frontier": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/06_calibration_frontier.png",
+    "dm_significance": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/07_dm_significance.png",
+    "var_exceedance_heatmap": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/08_var_exceedance_heatmap.png",
+    "split_performance_drift": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/09_split_performance_drift.png",
+    "best_model_intervals": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/10_best_model_intervals.png",
+    "pit_histogram": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/11_pit_histogram.png",
+    "qq_residuals": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/figures/12_qq_residuals.png"
+  },
+  "summary_markdown": "/Users/paritoshdwivedi/Cross-asset-neural-model-/artifacts/doctoral_v3/summary.md",
+  "leaderboard_top": [
+    {
+      "model": "har_rv",
+      "aggregate_rmse": 0.0014872240326508246,
+      "aggregate_mae": 0.0005243070416647927,
+      "aggregate_nll": -4.565466306930432,
+      "aggregate_coverage_95": 0.9685185185185184
+    },
+    {
+      "model": "prob_har_gaussian",
+      "aggregate_rmse": 0.0014872240326508246,
+      "aggregate_mae": 0.0005243070416647927,
+      "aggregate_nll": -4.565466306930432,
+      "aggregate_coverage_95": 0.9685185185185184
+    },
+    {
+      "model": "prob_har_student_t",
+      "aggregate_rmse": 0.0014872240326508246,
+      "aggregate_mae": 0.0005243070416647927,
+      "aggregate_nll": -5.613566801135769,
+      "aggregate_coverage_95": 0.976851851851852
+    }
+  ],
+  "num_splits": 6,
+  "num_models": 6,
+  "config": {
+    "seed": 42,
+    "quick": true,
+    "alpha": 0.05,
+    "include_lstm": true,
+    "include_student_t_baseline": true,
+    "data": {
+      "assets": [
+        "btc",
+        "eurusd",
+        "spx"
+      ],
+      "data_source": "synthetic",
+      "n_days": 900,
+      "start_date": "2016-01-01",
+      "timezone": "UTC",
+      "jump_z": 4.0,
+      "min_obs_per_day": 30,
+      "intraday_file_map": {},
+      "regime_transition": [
+        [
+          0.95,
+          0.04,
+          0.01
+        ],
+        [
+          0.07,
+          0.88,
+          0.05
+        ],
+        [
+          0.04,
+          0.1,
+          0.86
+        ]
+      ]
+    },
+    "features": {
+      "corr_window": 30,
+      "beta_window": 30,
+      "weekly_lag": 5,
+      "monthly_lag": 22
+    },
+    "walkforward": {
+      "train_size": 360,
+      "val_size": 120,
+      "test_size": 60,
+      "step_size": 60
+    },
+    "model": {
+      "sequence_length": 30,
+      "lstm_hidden": 24,
+      "lstm_layers": 1,
+      "lstm_dropout": 0.1,
+      "lstm_epochs": 4,
+      "batch_size": 64,
+      "learning_rate": 0.001
+    },
+    "risk": {
+      "var_alpha": 0.95,
+      "var_horizon_days": 1
+    },
+    "reporting": {
+      "output_dir": "artifacts",
+      "run_name": "doctoral_v3",
+      "dpi": 180,
+      "save_predictions_csv": true
+    }
+  }
+}

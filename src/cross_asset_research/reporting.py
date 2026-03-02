@@ -9,7 +9,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import seaborn as sns
-from scipy.stats import norm, probplot
+from scipy.stats import norm, probplot, t
 
 
 def prepare_report_dirs(output_dir: str, run_name: str) -> Dict[str, Path]:
@@ -218,17 +218,33 @@ def generate_advanced_figures(
         y = pred["y_true"].sort_index()
         mu = pred["mu"].sort_index()
         sigma = pred["sigma"].sort_index()
+        distribution = str(pred.get("distribution", "gaussian"))
+        dof_df = pred.get("dof")
 
         asset = assets[0]
-        z = norm.ppf(0.975)
-        lower = mu[asset] - z * sigma[asset]
-        upper = mu[asset] + z * sigma[asset]
+        if distribution == "student_t" and dof_df is not None and asset in dof_df.columns:
+            nu = np.maximum(dof_df[asset].to_numpy(dtype=float), 2.1)
+            q = t.ppf(0.975, df=nu)
+            lower = mu[asset].to_numpy(dtype=float) - q * sigma[asset].to_numpy(dtype=float)
+            upper = mu[asset].to_numpy(dtype=float) + q * sigma[asset].to_numpy(dtype=float)
+            lower = pd.Series(lower, index=mu.index)
+            upper = pd.Series(upper, index=mu.index)
+            standardized = (y[asset] - mu[asset]) / np.maximum(sigma[asset], 1e-6)
+            pit = t.cdf(standardized.to_numpy(dtype=float), df=nu)
+        else:
+            z = norm.ppf(0.975)
+            lower = mu[asset] - z * sigma[asset]
+            upper = mu[asset] + z * sigma[asset]
+            standardized = (y[asset] - mu[asset]) / np.maximum(sigma[asset], 1e-6)
+            pit = norm.cdf(standardized.to_numpy(dtype=float))
 
         fig, ax = plt.subplots(figsize=(14, 6))
         ax.plot(y.index, y[asset], label="realized", color="#1f77b4", lw=1.2)
         ax.plot(mu.index, mu[asset], label="predicted mean", color="#d62728", lw=1.2)
         ax.fill_between(mu.index, lower, upper, color="#d62728", alpha=0.18, label="95% interval")
-        ax.set_title(f"Best Model Forecast Intervals ({best_model}, {asset.upper()})")
+        ax.set_title(
+            f"Best Model Forecast Intervals ({best_model}, {asset.upper()}, {distribution})"
+        )
         ax.set_xlabel("Date")
         ax.set_ylabel("log(1 + RV)")
         ax.legend(loc="best")
@@ -236,8 +252,7 @@ def generate_advanced_figures(
         _save_figure(fig, path, dpi)
         outputs["best_model_intervals"] = path
 
-        zscore = (y[asset] - mu[asset]) / np.maximum(sigma[asset], 1e-6)
-        pit = norm.cdf(zscore)
+        zscore = standardized
 
         fig, ax = plt.subplots(figsize=(10, 5))
         ax.hist(pit, bins=20, density=True, color="#17becf", alpha=0.8, edgecolor="black")

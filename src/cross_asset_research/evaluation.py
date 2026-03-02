@@ -7,7 +7,7 @@ from typing import Dict, Iterable, List
 
 import numpy as np
 import pandas as pd
-from scipy.stats import norm
+from scipy.stats import norm, t
 
 
 @dataclass
@@ -41,9 +41,11 @@ def evaluate_model(
     y_true: pd.DataFrame,
     mu_pred: pd.DataFrame,
     sigma_pred: pd.DataFrame,
+    distribution: str = "gaussian",
+    dof_pred: pd.DataFrame | None = None,
     assets: Iterable[str],
 ) -> ModelEvaluation:
-    """Evaluate point and Gaussian probabilistic quality for one model."""
+    """Evaluate point and probabilistic quality for one model."""
 
     assets = list(assets)
     out: List[AssetMetric] = []
@@ -58,13 +60,21 @@ def evaluate_model(
         rmse = float(np.sqrt(np.mean(err**2)))
         mae = float(np.mean(np.abs(err)))
 
-        # Gaussian NLL.
-        nll_series = 0.5 * np.log(2.0 * np.pi * (s**2)) + 0.5 * ((err / s) ** 2)
+        if distribution == "student_t" and dof_pred is not None and asset in dof_pred.columns:
+            nu = np.maximum(dof_pred[asset].to_numpy(dtype=float), 2.1)
+            z = t.ppf(0.975, df=nu)
+            z = np.asarray(z, dtype=float)
+            standardized = err / s
+            nll_series = -(t.logpdf(standardized, df=nu) - np.log(s))
+            lower = m - z * s
+            upper = m + z * s
+        else:
+            # Gaussian NLL.
+            nll_series = 0.5 * np.log(2.0 * np.pi * (s**2)) + 0.5 * ((err / s) ** 2)
+            z = norm.ppf(0.975)
+            lower = m - z * s
+            upper = m + z * s
         nll = float(np.mean(nll_series))
-
-        z = norm.ppf(0.975)
-        lower = m - z * s
-        upper = m + z * s
         cover = float(np.mean((y >= lower) & (y <= upper)))
         width = float(np.mean(upper - lower))
 
